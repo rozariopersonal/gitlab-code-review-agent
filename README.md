@@ -69,10 +69,12 @@ gitlab-ai-reviewer/
 ├── repos/                        # Cloned GitHub repos (gitignored)
 │   └── .gitkeep
 ├── setup/
-│   ├── Dockerfile                 # Container for the auto-setup service
-│   ├── setup.sh                   # Auto-runs via docker-compose setup service
+│   ├── Dockerfile                 # Node.js container for the auto-setup service
+│   ├── entrypoint.sh              # Creates node_modules symlink, runs setup.js
+│   ├── package.json               # @gitbeaker/rest dependency
+│   ├── setup.js                   # Auto-runs via docker-compose setup service
+│   ├── gitlab.js                  # GitLab API client wrapping @gitbeaker/rest
 │   └── seed-test-repo.sh          # Fallback: generates a test repo if clone fails
-│   └── Dockerfile                # Container for the auto-setup service
 ├── docker-compose.yml            # GitLab CE + Runner + Auto-setup
 └── .env.example                  # Environment variables template
 ```
@@ -123,7 +125,7 @@ docker compose up -d
 
 Or run setup manually:
 ```bash
-./setup/setup.sh https://github.com/your-org/your-repo.git
+node setup/setup.js
 ```
 
 ### Prompt
@@ -189,7 +191,10 @@ The AI checks each rule against the diff.
 | `agent/ci-review.mjs` | CI pipeline script |
 | `agent/review-core.js` | Shared utilities (pure functions, zero dependencies) |
 | `agent/prompt.md` | AI prompt template |
-| `setup/setup.sh` | Auto-runs on docker compose up via setup service |
+| `setup/setup.js` | Auto-runs on docker compose up via setup service |
+| `setup/gitlab.js` | GitLab API client wrapping @gitbeaker/rest |
+| `setup/package.json` | @gitbeaker/rest dependency (installed at build time) |
+| `setup/entrypoint.sh` | Creates node_modules symlink at runtime, launches setup.js |
 | `setup/seed-test-repo.sh` | Fallback: generates test repo if clone fails |
-| `setup/Dockerfile` | Container for the auto-setup service |
+| `setup/Dockerfile` | Node.js container for the auto-setup service |
 | `docker-compose.yml` | GitLab CE + Runner + Auto-setup |

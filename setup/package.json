@@ -1,0 +1,8 @@
+{
+  "name": "gitlab-ai-reviewer-setup",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@gitbeaker/rest": "^43.0.0"
+  }
+}
