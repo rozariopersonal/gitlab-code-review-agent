@@ -1,0 +1,73 @@
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab-local
+    restart: unless-stopped
+    hostname: gitlab.local
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab.local:8929'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2289
+        gitlab_rails['initial_root_password'] = 'SecureRoot789!'
+        gitlab_rails['time_zone'] = 'UTC'
+        gitlab_rails['gitlab_email_enabled'] = false
+        prometheus_monitoring['enable'] = false
+    ports:
+      - "8929:8929"
+      - "2289:22"
+    volumes:
+      - gitlab_config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+    networks:
+      - gitlab-review-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8929/-/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  reviewer:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+      target: development
+    container_name: gitlab-reviewer
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      GITLAB_URL: http://gitlab:8929
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./agent:/app
+      - /app/node_modules
+    depends_on:
+      gitlab:
+        condition: service_healthy
+    networks:
+      - gitlab-review-net
+
+  runner:
+    image: gitlab/gitlab-runner:alpine
+    container_name: gitlab-runner
+    restart: unless-stopped
+    volumes:
+      - runner_config:/etc/gitlab-runner
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - gitlab-review-net
+
+volumes:
+  gitlab_config:
+  gitlab_logs:
+  gitlab_data:
+  runner_config:
+
+networks:
+  gitlab-review-net:
+    driver: bridge

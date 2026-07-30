@@ -1,0 +1,24 @@
+{
+  "object_kind": "merge_request",
+  "project": {
+    "id": 1,
+    "path_with_namespace": "test-user/test-project"
+  },
+  "object_attributes": {
+    "id": 1,
+    "iid": 1,
+    "title": "Fix division by zero and add input validation",
+    "description": "Adds safety checks and input processing",
+    "source_branch": "fix/division",
+    "target_branch": "main",
+    "source_project_id": 1,
+    "target_project_id": 1,
+    "state": "opened",
+    "action": "open",
+    "url": "http://localhost:8929/test-user/test-project/-/merge_requests/1"
+  },
+  "user": {
+    "name": "Developer",
+    "username": "dev-user"
+  }
+}
