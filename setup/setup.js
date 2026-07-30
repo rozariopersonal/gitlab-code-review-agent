@@ -125,7 +125,11 @@ async function main() {
   console.log('\n--- Step 3: Register Runner ---');
   await registerRunner(api);
 
-  console.log('\n--- Step 4: CI Templates ---');
+  console.log('\n--- Step 4: Build Agent Docker Image ---');
+  sh(`docker build -t ai-review-agent "${join(PROJECT_DIR, 'agent')}"`);
+  log('Agent image built.');
+
+  console.log('\n--- Step 5: CI Templates ---');
   const tp = await ensureProject(api, TEMPLATE_PROJECT, group.id);
 
   const tmp = join(tmpdir(), 'ci-templates-setup');
@@ -139,19 +143,13 @@ stages:
 
 ai-review:
   stage: review
-  image: node:22-alpine
-  before_script:
-    - apk add --no-cache curl
-    - curl -sO ${GITLAB_URL}/${GROUP_NAME}/${TEMPLATE_PROJECT}/-/raw/${templateRef}/ci-review.mjs
-  script:
-    - node ci-review.mjs
+  image: ai-review-agent:latest
   artifacts:
     when: always
     paths:
       - review-result.json
     expire_in: 30 days
   variables:
-    NODE_ENV: production
     GITLAB_URL: ${GITLAB_URL}
     CI_TEMPLATES_PROJECT: ${GROUP_NAME}/${TEMPLATE_PROJECT}
     CI_TEMPLATES_REF: ${templateRef}
@@ -164,7 +162,7 @@ ai-review:
   log('CI templates pushed.');
   await api.setVariable(tp.id, 'GITLAB_TOKEN', botPat);
 
-  console.log('\n--- Step 5: Test Repo ---');
+  console.log('\n--- Step 6: Test Repo ---');
   if (existsSync(REPO_DIR)) {
     log(`Repo exists at ${REPO_DIR} — pulling latest...`);
     try { sh(`git -C "${REPO_DIR}" pull --rebase`); } catch {}

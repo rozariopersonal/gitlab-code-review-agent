@@ -21,6 +21,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const GITLAB_URL = process.env.GITLAB_URL || process.env.CI_SERVER_URL || 'http://gitlab:8929';
 const PROJECT_ID = process.env.CI_PROJECT_ID;
@@ -39,12 +42,16 @@ const API = `${GITLAB_URL}/api/v4`;
 const headers = { 'PRIVATE-TOKEN': GITLAB_TOKEN, 'Content-Type': 'application/json' };
 
 /**
- * Fetch review-core.js from the CI templates project and import it.
+ * Load review-core.js — tries local file first (Docker image), then fetches
+ * from the templates project as fallback (curl-download mode).
  * Uses CI_TEMPLATES_PROJECT and CI_TEMPLATES_REF env vars (or defaults).
- * The file is downloaded to a temp file and dynamically imported.
  * @returns {Promise<object>} The review-core.js module exports
  */
 async function fetchCore() {
+  const localPath = path.join(__dirname, 'review-core.js');
+  if (fs.existsSync(localPath)) {
+    return await import(`file://${localPath}`);
+  }
   const rawUrl = `${GITLAB_URL}/${TEMPLATES_PROJECT}/-/raw/${TEMPLATES_REF}/review-core.js`;
   const res = await fetch(rawUrl);
   if (!res.ok) throw new Error(`Failed to fetch review-core.js (${res.status})`);
@@ -55,13 +62,19 @@ async function fetchCore() {
 }
 
 /**
- * Fetch and prepare the AI prompt from the CI templates project.
+ * Load the AI prompt — tries local file first (Docker image), then fetches
+ * from the templates project as fallback (curl-download mode).
  * Uses CI_TEMPLATES_PROJECT and CI_TEMPLATES_REF env vars (or defaults).
  * Replaces the {{DATE}} placeholder with today's date.
  * @returns {Promise<string>} The processed prompt text
  */
 async function fetchPrompt() {
   const today = new Date().toISOString().slice(0, 10);
+  const localPath = path.join(__dirname, 'prompt.md');
+  if (fs.existsSync(localPath)) {
+    let prompt = fs.readFileSync(localPath, 'utf-8');
+    return prompt.replace('{{DATE}}', today);
+  }
   const rawUrl = `${GITLAB_URL}/${TEMPLATES_PROJECT}/-/raw/${TEMPLATES_REF}/prompt.md`;
   const res = await fetch(rawUrl);
   if (!res.ok) throw new Error(`Failed to fetch prompt (${res.status}) from ${rawUrl}`);

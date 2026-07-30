@@ -62,10 +62,11 @@ git push -u gitlab feat/add-save-method
 
 ```
 gitlab-ai-reviewer/
-├── agent/                        # Review engine
+├── agent/                        # Review engine (packaged as Docker image)
 │   ├── ci-review.mjs             # CI pipeline script (entry point)
 │   ├── review-core.js            # Shared utilities (pure functions, no deps)
-│   └── prompt.md                 # AI prompt template with {{DATE}}
+│   ├── prompt.md                 # AI prompt template with {{DATE}}
+│   └── Dockerfile                # Builds ai-review-agent image
 ├── repos/                        # Cloned GitHub repos (gitignored)
 │   └── .gitkeep
 ├── setup/
@@ -85,7 +86,7 @@ The review runs as a CI job inside the target project's pipeline — no external
 
 ### CI Templates Project
 
-The pipeline script (`ci-review.mjs`) and utilities (`review-core.js`, `prompt.md`) live in a central `dev-team/ci-templates` project. Target projects include them:
+The pipeline template lives in `dev-team/ci-templates`. Target projects include it:
 
 ```yaml
 include:
@@ -94,7 +95,7 @@ include:
     ref: main
 ```
 
-At pipeline runtime, `ci-review.mjs` fetches `review-core.js` and `prompt.md` from the templates project via raw URL, then:
+The template uses a pre-built Docker image (`ai-review-agent:latest`) that bundles `ci-review.mjs`, `review-core.js`, and `prompt.md`. The CI job simply runs the image — no downloading, no install step. The agent:
 
 1. Retrieves the MR diff and full file contents from the GitLab API
 2. Parses spec requirements from the MR description and `.review-rules.md`
@@ -187,10 +188,11 @@ The AI checks each rule against the diff.
 ## Project Files
 
 | File | Purpose |
-|---|---|
-| `agent/ci-review.mjs` | CI pipeline script |
+|---|---|---|
+| `agent/ci-review.mjs` | CI pipeline script (entry point, packaged in Docker image) |
 | `agent/review-core.js` | Shared utilities (pure functions, zero dependencies) |
-| `agent/prompt.md` | AI prompt template |
+| `agent/prompt.md` | AI prompt template with `{{DATE}}` placeholder |
+| `agent/Dockerfile` | Builds the `ai-review-agent` image |
 | `setup/setup.js` | Auto-runs on docker compose up via setup service |
 | `setup/gitlab.js` | GitLab API client wrapping @gitbeaker/rest |
 | `setup/package.json` | @gitbeaker/rest dependency (installed at build time) |
