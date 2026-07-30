@@ -24,10 +24,31 @@ ROOT_PAT="${ROOT_PAT:-glpat-mNRpiNXX6W6U7i9ucUTokG86MQp1OjEH.01.0w12dz3vp}"
 ROOT_PASSWORD="${ROOT_PASSWORD:-SecureRoot789!}"
 BOT_PAT="${BOT_PAT:-glpat-U03T2HSPKo1hDa3rxzMYQW86MQp1OjMH.01.0w1kjblyw}"
 
-SOURCE_REPO="${1:-https://github.com/rozariopersonal/order-service-test.git}"
-REPO_NAME="$(basename "$SOURCE_REPO" .git)"
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)/repos/$REPO_NAME"
+SOURCE_REPO="${1:-${SOURCE_REPO:-}}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# If no source repo provided, seed a local test repo
+if [ -z "$SOURCE_REPO" ]; then
+  REPO_NAME="order-service-test"
+  REPO_DIR="$PROJECT_DIR/repos/$REPO_NAME"
+  if [ ! -d "$REPO_DIR" ]; then
+    echo "Seeding test repo with planted issues ..."
+    bash "$PROJECT_DIR/scripts/seed-test-repo.sh" "$REPO_DIR"
+  fi
+else
+  REPO_NAME="$(basename "$SOURCE_REPO" .git)"
+  REPO_DIR="$PROJECT_DIR/repos/$REPO_NAME"
+  if [ -d "$REPO_DIR" ]; then
+    echo "Repo exists at $REPO_DIR — pulling latest..."
+    git -C "$REPO_DIR" pull --rebase 2>/dev/null || true
+  else
+    echo "Cloning $SOURCE_REPO ..."
+    git clone "$SOURCE_REPO" "$REPO_DIR" || {
+      echo "Clone failed, seeding local test repo instead ..."
+      bash "$PROJECT_DIR/scripts/seed-test-repo.sh" "$REPO_DIR"
+    }
+  fi
+fi
 
 GROUP_NAME="${GROUP_NAME:-dev-team}"
 TEMPLATE_PROJECT="${TEMPLATE_PROJECT:-ci-templates}"
@@ -105,7 +126,56 @@ push_to_gitlab() {
   git -C "$dir" remote remove "$remote_name" 2>/dev/null || true
 }
 
-# ── 1. CI Templates Project ──────────────────────────
+# ── Register Runner ─────────────────────────────────
+echo ""
+echo "--- Step 1: Register Runner ---"
+
+# Wait for runner container
+for i in $(seq 1 10); do
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^gitlab-runner$'; then
+    break
+  fi
+  if [ "$i" -eq 10 ]; then
+    echo "  WARNING: Runner container not found. CI jobs will not execute."
+    echo "  Register manually: docker exec -it gitlab-runner gitlab-runner register"
+  fi
+  sleep 3
+done
+
+# Check if runner is already registered via GitLab API
+REGISTERED=$(curl -s --header "PRIVATE-TOKEN: $ROOT_PAT" \
+  "$GITLAB_URL/api/v4/runners" 2>/dev/null \
+  | python3 -c "import sys,json; r=json.load(sys.stdin); print('yes' if r else 'no')" 2>/dev/null || echo "no")
+
+if [ "$REGISTERED" = "no" ]; then
+  echo "  Registering runner (project-runner, docker executor)..."
+  # Get registration token from GitLab admin settings
+  REG_TOKEN=$(curl -s --header "PRIVATE-TOKEN: $ROOT_PAT" \
+    "$GITLAB_URL/api/v4/application/settings" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('runner_registration_token',''))" 2>/dev/null || true)
+  if [ -z "$REG_TOKEN" ]; then
+    echo "  WARNING: Could not get runner registration token from API."
+    echo "  Register manually: docker exec -it gitlab-runner gitlab-runner register"
+  else
+    docker exec gitlab-runner gitlab-runner register \
+      --non-interactive \
+      --url "http://gitlab:8929" \
+      --registration-token "$REG_TOKEN" \
+      --executor "docker" \
+      --docker-image "node:22-alpine" \
+      --docker-network-mode "gitlab-ai-reviewer_gitlab-review-net" \
+      --docker-volumes "/var/run/docker.sock:/var/run/docker.sock" \
+      --tag-list "project-runner" \
+      --description "project-runner" \
+      --run-untagged="true" \
+      --locked="false" 2>&1 | tail -3
+    echo "  Runner registered."
+  fi
+else
+  echo "  Runner already registered."
+fi
+
+# ── 2. CI Templates Project ──────────────────────────
 echo ""
 echo "--- Step 1: CI Templates ---"
 
@@ -159,18 +229,9 @@ curl -sf --header "PRIVATE-TOKEN: $ROOT_PAT" \
   --data "{\"key\": \"GITLAB_TOKEN\", \"value\": \"$BOT_PAT\", \"protected\": false, \"masked\": true, \"environment_scope\": \"*\"}" \
   "$GITLAB_URL/api/v4/projects/$TEMPLATE_ID/variables/GITLAB_TOKEN" >/dev/null 2>&1 || true
 
-# ── 2. Test Repo Project ──────────────────────────────
+# ── 3. Test Repo Project ──────────────────────────────
 echo ""
 echo "--- Step 2: Test Repo ---"
-
-# Clone source repo
-if [ -d "$REPO_DIR" ]; then
-  echo "Repo exists at $REPO_DIR — pulling latest..."
-  git -C "$REPO_DIR" pull --rebase 2>/dev/null || true
-else
-  echo "Cloning $SOURCE_REPO ..."
-  git clone "$SOURCE_REPO" "$REPO_DIR"
-fi
 
 PROJECT_ID=$(ensure_project "$REPO_NAME" "$GROUP_ID")
 
@@ -203,11 +264,18 @@ curl -sf --header "PRIVATE-TOKEN: $ROOT_PAT" \
   --data "{\"key\": \"GITLAB_TOKEN\", \"value\": \"$BOT_PAT\", \"protected\": false, \"masked\": true, \"environment_scope\": \"*\"}" \
   "$GITLAB_URL/api/v4/projects/$PROJECT_ID/variables/GITLAB_TOKEN" >/dev/null 2>&1 || true
 
+# Determine external URL for user-facing messages
+if echo "$GITLAB_URL" | grep -q 'gitlab:8929'; then
+  EXT_URL="http://localhost:8929"
+else
+  EXT_URL="$GITLAB_URL"
+fi
+
 echo ""
 echo "=== Setup Complete ==="
 echo ""
-echo "  Templates:    $GITLAB_URL/$GROUP_NAME/$TEMPLATE_PROJECT"
-echo "  Test repo:    $GITLAB_URL/$GROUP_NAME/$REPO_NAME"
+echo "  Templates:    $EXT_URL/$GROUP_NAME/$TEMPLATE_PROJECT"
+echo "  Test repo:    $EXT_URL/$GROUP_NAME/$REPO_NAME"
 echo "  Local clone:  $REPO_DIR"
 echo ""
 echo "To test the AI review:"
@@ -215,7 +283,7 @@ echo "  1. cd $REPO_DIR"
 echo "  2. Create a branch and make changes:"
 echo "     git checkout -b feat/my-test"
 echo "  3. Commit and push to GitLab:"
-echo "     git remote add gitlab http://root:$ROOT_PASSWORD@${GITLAB_URL#http://}/$GROUP_NAME/$REPO_NAME.git"
+echo "     git remote add gitlab http://root:SecureRoot789!@localhost:8929/$GROUP_NAME/$REPO_NAME.git"
 echo "     git push -u gitlab feat/my-test"
-echo "  4. Open an MR at $GITLAB_URL/$GROUP_NAME/$REPO_NAME"
+echo "  4. Open an MR at $EXT_URL/$GROUP_NAME/$REPO_NAME"
 echo "  5. Watch the AI review pipeline run"

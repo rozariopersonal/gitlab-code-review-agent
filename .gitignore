@@ -5,3 +5,4 @@ dist/
 .gitlab/
 repos/*/
 !repos/.gitkeep
+repos/*/node_modules/

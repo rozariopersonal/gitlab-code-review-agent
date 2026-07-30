@@ -41,23 +41,22 @@ Developer pushes MR ──► GitLab CI triggers review job
 ## Quick Start
 
 ```bash
-# 1. Start GitLab + Runner
-docker compose up -d
-
-# 2. Set your Gemini API key
+# Set your Gemini API key (get one free at https://aistudio.google.com/apikey)
 export GEMINI_API_KEY="your-key-here"
 
-# 3. Run setup — creates templates + test repo on local GitLab
-./scripts/setup.sh
+# Start everything — GitLab, Runner, and automatic setup
+docker compose up -d
 
-# 4. Test the review
-cd repos/order-service
+# Wait for setup to complete, then test the review
+# (setup runs automatically and clones a test repo with planted issues)
+cd repos/order-service-test
 git checkout -b feat/test-review
 # make some changes...
 git add -A && git commit -m "Test review"
-git remote add gitlab http://root:SecureRoot789!@localhost:8929/dev-team/order-service.git
+git remote add gitlab http://root:SecureRoot789!@localhost:8929/dev-team/order-service-test.git
 git push -u gitlab feat/test-review
-# Open MR at http://localhost:8929/dev-team/order-service
+# Open MR at http://localhost:8929/dev-team/order-service-test
+# Wait for the AI review pipeline to finish
 ```
 
 ## Architecture
@@ -81,11 +80,14 @@ gitlab-ai-reviewer/
 ├── repos/                        # 📦 Cloned test repos (gitignored)
 │   └── .gitkeep
 ├── scripts/
-│   └── setup.sh                  # 🚀 One-command environment setup
+│   ├── setup.sh                  # 🚀 Auto-runs via docker-compose setup service
+│   └── seed-test-repo.sh         # Generates test repo with planted issues
+├── setup/
+│   └── Dockerfile                # Lightweight container for setup service
 ├── test/
 │   ├── send-webhook.sh           # Test script for webhook mode
 │   └── webhook-payload.json      # Sample webhook payload
-├── docker-compose.yml            # GitLab CE + Runner + Reviewer
+├── docker-compose.yml            # GitLab CE + Runner + Auto-setup
 └── .env.example                  # Environment variables template
 ```
 
@@ -110,51 +112,32 @@ The CI job:
 6. Saves `review-result.json` as a CI artifact
 7. Exits with code 1 if issues found — blocking the merge
 
-## Setup
+## What Gets Created
 
-### Prerequisites
+When `docker compose up` runs, the `setup` service automatically:
 
-- Docker & Docker Compose
-- A Google Gemini API key ([get one free](https://aistudio.google.com/apikey))
+| Resource | Description |
+|---|---|
+| `dev-team` group | GitLab group for all projects |
+| `dev-team/ci-templates` | CI template project with `ci-review.mjs`, `review-core.js`, `prompt.md`, `ci-template.yml` |
+| `dev-team/order-service-test` | Test project with planted issues for demonstration |
+| `repos/order-service-test/` | Local clone of the test repo — edit code here and push to GitLab |
+| `project-runner` | GitLab Runner registered with Docker executor |
+| CI labels | `review/pass` and `review/fail` labels on the test project |
 
-### One-Command Setup
+## Customization
+
+### Use Your Own Test Repo
 
 ```bash
-# Start GitLab and the Runner
+export SOURCE_REPO="https://github.com/your-org/your-repo.git"
 docker compose up -d
-
-# Run setup (creates templates project + test repo)
-GEMINI_API_KEY="your-key-here" ./scripts/setup.sh
 ```
 
-The setup script:
-1. Waits for GitLab to be healthy
-2. Creates the `dev-team/ci-templates` project with `ci-review.mjs`, `review-core.js`, `prompt.md`, and `ci-template.yml`
-3. Clones a GitHub repo into `repos/<name>` (default: `order-service-test`)
-4. Creates the `dev-team/<repo>` project on GitLab
-5. Pushes the repo and adds `.gitlab-ci.yml` with the template include
-6. Creates CI labels and sets the `GITLAB_TOKEN` variable
-
-### Custom Test Repo
-
-Use any GitHub repo as the test project:
-
+Or run setup manually with any repo:
 ```bash
 ./scripts/setup.sh https://github.com/your-org/your-repo.git
 ```
-
-Once cloned to `repos/<name>`, you can edit code locally and push to the local GitLab to test the review.
-
-### CI Variables
-
-Set these in your target project's **Settings → CI/CD → Variables**:
-
-| Variable | Description |
-|---|---|
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `GITLAB_TOKEN` | GitLab PAT (Reporter scope) for posting comments |
-
-## Customization
 
 ### Prompt
 
@@ -222,5 +205,7 @@ The AI checks each rule against the diff.
 | `agent/src/index.ts` | Webhook server |
 | `agent/src/reviewer.ts` | Review orchestration |
 | `agent/src/gitlab.ts` | GitLab API client |
-| `scripts/setup.sh` | One-command environment setup |
-| `docker-compose.yml` | GitLab CE + Runner + Reviewer |
+| `scripts/setup.sh` | Auto-runs on docker compose up via setup service |
+| `scripts/seed-test-repo.sh` | Generates a test repo with planted issues |
+| `setup/Dockerfile` | Container for the auto-setup service |
+| `docker-compose.yml` | GitLab CE + Runner + Reviewer + Auto-setup |
