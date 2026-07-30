@@ -9,11 +9,13 @@
  * exits with code 1 if issues are found (blocking the merge).
  *
  * Environment Variables:
- *   CI_PROJECT_ID       — GitLab project ID (set by GitLab CI)
+ *   CI_PROJECT_ID        — GitLab project ID (set by GitLab CI)
  *   CI_MERGE_REQUEST_IID — MR internal ID (set by GitLab CI)
  *   GITLAB_TOKEN         — GitLab PAT with Reporter scope for API calls
  *   GEMINI_API_KEY       — Google Gemini API key
  *   GITLAB_URL           — GitLab instance URL (default: http://gitlab:8929)
+ *   CI_TEMPLATES_PROJECT — Templates project path (default: dev-team/ci-templates)
+ *   CI_TEMPLATES_REF     — Templates branch/ref (default: main)
  */
 
 import * as fs from 'fs';
@@ -25,6 +27,8 @@ const PROJECT_ID = process.env.CI_PROJECT_ID;
 const MR_IID = process.env.CI_MERGE_REQUEST_IID;
 const GITLAB_TOKEN = process.env.GITLAB_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TEMPLATES_PROJECT = process.env.CI_TEMPLATES_PROJECT || 'dev-team/ci-templates';
+const TEMPLATES_REF = process.env.CI_TEMPLATES_REF || 'main';
 
 if (!PROJECT_ID || !MR_IID || !GITLAB_TOKEN || !GEMINI_API_KEY) {
   console.error('Missing CI env vars: CI_PROJECT_ID, CI_MERGE_REQUEST_IID, GITLAB_TOKEN, GEMINI_API_KEY');
@@ -36,11 +40,12 @@ const headers = { 'PRIVATE-TOKEN': GITLAB_TOKEN, 'Content-Type': 'application/js
 
 /**
  * Fetch review-core.js from the CI templates project and import it.
+ * Uses CI_TEMPLATES_PROJECT and CI_TEMPLATES_REF env vars (or defaults).
  * The file is downloaded to a temp file and dynamically imported.
  * @returns {Promise<object>} The review-core.js module exports
  */
 async function fetchCore() {
-  const rawUrl = `${GITLAB_URL}/dev-team/ci-templates/-/raw/main/review-core.js`;
+  const rawUrl = `${GITLAB_URL}/${TEMPLATES_PROJECT}/-/raw/${TEMPLATES_REF}/review-core.js`;
   const res = await fetch(rawUrl);
   if (!res.ok) throw new Error(`Failed to fetch review-core.js (${res.status})`);
   const content = await res.text();
@@ -51,12 +56,13 @@ async function fetchCore() {
 
 /**
  * Fetch and prepare the AI prompt from the CI templates project.
+ * Uses CI_TEMPLATES_PROJECT and CI_TEMPLATES_REF env vars (or defaults).
  * Replaces the {{DATE}} placeholder with today's date.
  * @returns {Promise<string>} The processed prompt text
  */
 async function fetchPrompt() {
   const today = new Date().toISOString().slice(0, 10);
-  const rawUrl = `${GITLAB_URL}/dev-team/ci-templates/-/raw/main/prompt.md`;
+  const rawUrl = `${GITLAB_URL}/${TEMPLATES_PROJECT}/-/raw/${TEMPLATES_REF}/prompt.md`;
   const res = await fetch(rawUrl);
   if (!res.ok) throw new Error(`Failed to fetch prompt (${res.status}) from ${rawUrl}`);
   let prompt = await res.text();

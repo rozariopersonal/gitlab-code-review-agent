@@ -184,7 +184,7 @@ cp "$PROJECT_DIR/agent/review-core.js" "$TMPDIR/"
 cp "$PROJECT_DIR/agent/prompt.md" "$TMPDIR/"
 
 # Create ci-template.yml
-cat > "$TMPDIR/ci-template.yml" << 'YAML'
+cat > "$TMPDIR/ci-template.yml" << YAML
 stages:
   - review
 
@@ -193,7 +193,7 @@ ai-review:
   image: node:22-alpine
   before_script:
     - apk add --no-cache curl
-    - curl -sO http://gitlab:8929/dev-team/ci-templates/-/raw/main/ci-review.mjs
+    - curl -sO ${GITLAB_URL}/${TEMPLATES_PROJECT}/-/raw/${TEMPLATES_REF}/ci-review.mjs
   script:
     - node ci-review.mjs
   artifacts:
@@ -203,9 +203,11 @@ ai-review:
     expire_in: 30 days
   variables:
     NODE_ENV: production
-    GITLAB_URL: http://gitlab:8929
+    GITLAB_URL: ${GITLAB_URL}
+    CI_TEMPLATES_PROJECT: ${TEMPLATES_PROJECT}
+    CI_TEMPLATES_REF: ${TEMPLATES_REF}
   rules:
-    - if: $CI_MERGE_REQUEST_IID
+    - if: \$CI_MERGE_REQUEST_IID
 YAML
 
 git init "$TMPDIR"
@@ -232,10 +234,12 @@ PROJECT_ID=$(ensure_project "$REPO_NAME" "$GROUP_ID")
 
 # Ensure .gitlab-ci.yml includes the template
 if [ ! -f "$REPO_DIR/.gitlab-ci.yml" ]; then
-  echo 'include:
-  - project: dev-team/ci-templates
+  cat > "$REPO_DIR/.gitlab-ci.yml" << EOF
+include:
+  - project: ${TEMPLATES_PROJECT}
     file: ci-template.yml
-    ref: main' > "$REPO_DIR/.gitlab-ci.yml"
+    ref: ${TEMPLATES_REF}
+EOF
   git -C "$REPO_DIR" add .gitlab-ci.yml
   git -C "$REPO_DIR" commit -m "Add AI review CI template" --no-verify 2>/dev/null || true
 fi
