@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generates a test repo with planted issues for demonstrating the AI review agent.
-# Usage: ./scripts/seed-test-repo.sh <target-directory>
+# Usage: ./setup/seed-test-repo.sh <target-directory>
 set -euo pipefail
 
 TARGET="${1:-repos/order-service-test}"

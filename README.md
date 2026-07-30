@@ -68,10 +68,10 @@ gitlab-ai-reviewer/
 │   └── prompt.md                 # AI prompt template with {{DATE}}
 ├── repos/                        # Cloned GitHub repos (gitignored)
 │   └── .gitkeep
-├── scripts/
-│   ├── setup.sh                  # Auto-runs via docker-compose setup service
-│   └── seed-test-repo.sh         # Fallback: generates a test repo if clone fails
 ├── setup/
+│   ├── Dockerfile                 # Container for the auto-setup service
+│   ├── setup.sh                   # Auto-runs via docker-compose setup service
+│   └── seed-test-repo.sh          # Fallback: generates a test repo if clone fails
 │   └── Dockerfile                # Container for the auto-setup service
 ├── docker-compose.yml            # GitLab CE + Runner + Auto-setup
 └── .env.example                  # Environment variables template
@@ -123,7 +123,7 @@ docker compose up -d
 
 Or run setup manually:
 ```bash
-./scripts/setup.sh https://github.com/your-org/your-repo.git
+./setup/setup.sh https://github.com/your-org/your-repo.git
 ```
 
 ### Prompt
@@ -189,7 +189,7 @@ The AI checks each rule against the diff.
 | `agent/ci-review.mjs` | CI pipeline script |
 | `agent/review-core.js` | Shared utilities (pure functions, zero dependencies) |
 | `agent/prompt.md` | AI prompt template |
-| `scripts/setup.sh` | Auto-runs on docker compose up via setup service |
-| `scripts/seed-test-repo.sh` | Fallback: generates test repo if clone fails |
+| `setup/setup.sh` | Auto-runs on docker compose up via setup service |
+| `setup/seed-test-repo.sh` | Fallback: generates test repo if clone fails |
 | `setup/Dockerfile` | Container for the auto-setup service |
 | `docker-compose.yml` | GitLab CE + Runner + Auto-setup |
