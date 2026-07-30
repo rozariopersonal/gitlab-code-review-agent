@@ -48,14 +48,14 @@ export GEMINI_API_KEY="your-key-here"
 docker compose up -d
 
 # Wait for setup to complete, then test the review
-# (setup runs automatically and clones a test repo with planted issues)
-cd repos/order-service-test
-git checkout -b feat/test-review
-# make some changes...
-git add -A && git commit -m "Test review"
-git remote add gitlab http://root:SecureRoot789!@localhost:8929/dev-team/order-service-test.git
-git push -u gitlab feat/test-review
-# Open MR at http://localhost:8929/dev-team/order-service-test
+# (setup runs automatically and clones sindresorhus/conf)
+cd repos/conf
+git checkout -b feat/add-save-method
+# make some changes (e.g. add a new feature)
+git add -A && git commit -m "feat: add save method"
+git remote add gitlab http://root:SecureRoot789!@localhost:8929/dev-team/conf.git
+git push -u gitlab feat/add-save-method
+# Open MR at http://localhost:8929/dev-team/conf
 # Wait for the AI review pipeline to finish
 ```
 
@@ -81,7 +81,7 @@ gitlab-ai-reviewer/
 │   └── .gitkeep
 ├── scripts/
 │   ├── setup.sh                  # 🚀 Auto-runs via docker-compose setup service
-│   └── seed-test-repo.sh         # Generates test repo with planted issues
+│   └── seed-test-repo.sh         # Fallback: generates a test repo if clone fails
 ├── setup/
 │   └── Dockerfile                # Lightweight container for setup service
 ├── test/
@@ -120,8 +120,8 @@ When `docker compose up` runs, the `setup` service automatically:
 |---|---|
 | `dev-team` group | GitLab group for all projects |
 | `dev-team/ci-templates` | CI template project with `ci-review.mjs`, `review-core.js`, `prompt.md`, `ci-template.yml` |
-| `dev-team/order-service-test` | Test project with planted issues for demonstration |
-| `repos/order-service-test/` | Local clone of the test repo — edit code here and push to GitLab |
+| `dev-team/conf` | Mirror of `sindresorhus/conf` — a real open-source TypeScript config library |
+| `repos/conf/` | Local clone — edit code here and push to GitLab to test the review |
 | `project-runner` | GitLab Runner registered with Docker executor |
 | CI labels | `review/pass` and `review/fail` labels on the test project |
 
@@ -206,6 +206,6 @@ The AI checks each rule against the diff.
 | `agent/src/reviewer.ts` | Review orchestration |
 | `agent/src/gitlab.ts` | GitLab API client |
 | `scripts/setup.sh` | Auto-runs on docker compose up via setup service |
-| `scripts/seed-test-repo.sh` | Generates a test repo with planted issues |
+| `scripts/seed-test-repo.sh` | Fallback: generates a test repo if clone fails |
 | `setup/Dockerfile` | Container for the auto-setup service |
 | `docker-compose.yml` | GitLab CE + Runner + Reviewer + Auto-setup |

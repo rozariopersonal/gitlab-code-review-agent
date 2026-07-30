@@ -13,7 +13,7 @@ set -euo pipefail
 # Usage:
 #   ./scripts/setup.sh [github-repo-url]
 #
-# Default test repo: https://github.com/rozariopersonal/order-service-test.git
+# Default: https://github.com/sindresorhus/conf.git (247 KB, TypeScript)
 #
 # Prerequisites:
 #   docker compose up -d       (gitlab + runner services)
@@ -27,27 +27,22 @@ BOT_PAT="${BOT_PAT:-glpat-U03T2HSPKo1hDa3rxzMYQW86MQp1OjMH.01.0w1kjblyw}"
 SOURCE_REPO="${1:-${SOURCE_REPO:-}}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-# If no source repo provided, seed a local test repo
+# Default: clone a small real open-source project
 if [ -z "$SOURCE_REPO" ]; then
-  REPO_NAME="order-service-test"
-  REPO_DIR="$PROJECT_DIR/repos/$REPO_NAME"
-  if [ ! -d "$REPO_DIR" ]; then
-    echo "Seeding test repo with planted issues ..."
-    bash "$PROJECT_DIR/scripts/seed-test-repo.sh" "$REPO_DIR"
-  fi
+  SOURCE_REPO="https://github.com/sindresorhus/conf.git"
+fi
+
+REPO_NAME="$(basename "$SOURCE_REPO" .git)"
+REPO_DIR="$PROJECT_DIR/repos/$REPO_NAME"
+if [ -d "$REPO_DIR" ]; then
+  echo "Repo exists at $REPO_DIR — pulling latest..."
+  git -C "$REPO_DIR" pull --rebase 2>/dev/null || true
 else
-  REPO_NAME="$(basename "$SOURCE_REPO" .git)"
-  REPO_DIR="$PROJECT_DIR/repos/$REPO_NAME"
-  if [ -d "$REPO_DIR" ]; then
-    echo "Repo exists at $REPO_DIR — pulling latest..."
-    git -C "$REPO_DIR" pull --rebase 2>/dev/null || true
-  else
-    echo "Cloning $SOURCE_REPO ..."
-    git clone "$SOURCE_REPO" "$REPO_DIR" || {
-      echo "Clone failed, seeding local test repo instead ..."
-      bash "$PROJECT_DIR/scripts/seed-test-repo.sh" "$REPO_DIR"
-    }
-  fi
+  echo "Cloning $SOURCE_REPO ..."
+  git clone "$SOURCE_REPO" "$REPO_DIR" || {
+    echo "Clone failed, seeding local test repo instead ..."
+    bash "$PROJECT_DIR/scripts/seed-test-repo.sh" "$REPO_DIR"
+  }
 fi
 
 GROUP_NAME="${GROUP_NAME:-dev-team}"
@@ -280,10 +275,10 @@ echo "  Local clone:  $REPO_DIR"
 echo ""
 echo "To test the AI review:"
 echo "  1. cd $REPO_DIR"
-echo "  2. Create a branch and make changes:"
-echo "     git checkout -b feat/my-test"
+echo "  2. Create a branch and make a change:"
+echo "     git checkout -b feat/my-change"
 echo "  3. Commit and push to GitLab:"
 echo "     git remote add gitlab http://root:SecureRoot789!@localhost:8929/$GROUP_NAME/$REPO_NAME.git"
-echo "     git push -u gitlab feat/my-test"
+echo "     git push -u gitlab feat/my-change"
 echo "  4. Open an MR at $EXT_URL/$GROUP_NAME/$REPO_NAME"
 echo "  5. Watch the AI review pipeline run"
