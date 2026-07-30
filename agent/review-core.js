@@ -1,3 +1,16 @@
+/**
+ * @file Shared utilities for the GitLab AI code review agent.
+ * Used by both the CI pipeline script (ci-review.mjs) and webhook server (deprecated).
+ * All functions are pure — no side effects, no I/O, no dependencies.
+ */
+
+/**
+ * Replace literal newlines inside JSON strings with escaped newlines (\n).
+ * Gemini sometimes returns real newlines within string values, which breaks JSON.parse.
+ * Walks the raw character stream tracking string boundaries.
+ * @param {string} raw - Raw JSON text from Gemini
+ * @returns {string} Sanitized JSON text with escaped newlines in strings
+ */
 function fixJSONNewlines(raw) {
   let out = '', inStr = false, esc = false;
   for (const ch of raw) {
@@ -10,6 +23,17 @@ function fixJSONNewlines(raw) {
   return out;
 }
 
+/**
+ * Given a unified diff patch and a target line number in the new file,
+ * find the corresponding old line number. Used to construct GitLab position
+ * objects for inline comments on modified (not added) lines.
+ *
+ * Walks the hunk headers (@@ -old +new @@) and counts lines to determine
+ * the old-line mapping. Returns {} for added lines (no old_line needed).
+ * @param {string|undefined} patch - Unified diff patch text
+ * @param {number} targetNewLine - Line number in the new file
+ * @returns {{old_line?: number}} Object with old_line if the line exists in the old file
+ */
 function getLinePosition(patch, targetNewLine) {
   if (!patch) return {};
   const lines = patch.split('\n');
@@ -26,6 +50,12 @@ function getLinePosition(patch, targetNewLine) {
   return {};
 }
 
+/**
+ * Extract all line numbers in the new file that appear in a unified diff patch.
+ * Used to determine which positions are valid targets for inline comments.
+ * @param {string} patch - Unified diff patch text
+ * @returns {Set<number>} Set of new-file line numbers present in the diff
+ */
 function getDiffLineNumbers(patch) {
   const lines = patch.split('\n');
   const nums = new Set();
@@ -39,6 +69,13 @@ function getDiffLineNumbers(patch) {
   return nums;
 }
 
+/**
+ * Format a unified diff patch with line number prefixes for the AI prompt.
+ * Each line in the new file gets a "NNN>" prefix (e.g., " 42>+console.log()").
+ * Removed lines show "    " (no prefix). Helps Gemini reference exact line numbers.
+ * @param {string} patch - Unified diff patch text
+ * @returns {string} Formatted diff with line number prefixes
+ */
 function formatDiffWithLineNumbers(patch) {
   const lines = patch.split('\n');
   const out = [];
@@ -55,6 +92,14 @@ function formatDiffWithLineNumbers(patch) {
   return out.join('\n');
 }
 
+/**
+ * Parse spec requirements from an MR description or .review-rules.md file.
+ * Looks for a "## Spec" section and extracts checkbox items:
+ *   - [ ] Requirement text
+ *   - [x] Completed requirement text
+ * @param {string} description - Markdown text (MR description or file content)
+ * @returns {string[]} Array of requirement descriptions
+ */
 function parseSpec(description) {
   if (!description) return [];
   const m = description.match(/## Spec\s*\n([\s\S]*?)(?:\n## |$)/);
@@ -64,12 +109,24 @@ function parseSpec(description) {
   return items.map(item => item.replace(/-\s*\[.?\]\s*/, '').trim());
 }
 
+/**
+ * Build a markdown "Spec Requirements" section for the AI prompt.
+ * Wraps spec items in a checklist format with [ ] markers.
+ * @param {string[]} specs - Array of requirement descriptions
+ * @returns {string} Formatted markdown section (empty string if no specs)
+ */
 function buildSpecContext(specs) {
   if (!specs || specs.length === 0) return '';
   const items = specs.map((s, i) => `${i + 1}. [ ] ${s}`).join('\n');
   return `## Spec Requirements\n\n${items}\n\n`;
 }
 
+/**
+ * Build a markdown spec-compliance summary for the MR summary note.
+ * Shows passed / failed checkboxes with reasons for failures.
+ * @param {{text: string, satisfied: boolean, reason?: string}[]} specResults
+ * @returns {string} Formatted markdown section (empty string if no results)
+ */
 function buildSpecExtra(specResults) {
   if (!specResults || specResults.length === 0) return '';
   const passed = specResults.filter(s => s.satisfied);

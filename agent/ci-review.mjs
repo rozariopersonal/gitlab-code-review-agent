@@ -1,4 +1,21 @@
 #!/usr/bin/env node
+
+/**
+ * @file GitLab AI Code Review — CI Pipeline Script
+ *
+ * Runs inside a GitLab CI job to review merge requests using Google Gemini.
+ * Fetches the MR diff, full file context, spec requirements, and project rules,
+ * sends them to Gemini with a structured prompt, posts inline comments, and
+ * exits with code 1 if issues are found (blocking the merge).
+ *
+ * Environment Variables:
+ *   CI_PROJECT_ID       — GitLab project ID (set by GitLab CI)
+ *   CI_MERGE_REQUEST_IID — MR internal ID (set by GitLab CI)
+ *   GITLAB_TOKEN         — GitLab PAT with Reporter scope for API calls
+ *   GEMINI_API_KEY       — Google Gemini API key
+ *   GITLAB_URL           — GitLab instance URL (default: http://gitlab:8929)
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
@@ -17,6 +34,11 @@ if (!PROJECT_ID || !MR_IID || !GITLAB_TOKEN || !GEMINI_API_KEY) {
 const API = `${GITLAB_URL}/api/v4`;
 const headers = { 'PRIVATE-TOKEN': GITLAB_TOKEN, 'Content-Type': 'application/json' };
 
+/**
+ * Fetch review-core.js from the CI templates project and import it.
+ * The file is downloaded to a temp file and dynamically imported.
+ * @returns {Promise<object>} The review-core.js module exports
+ */
 async function fetchCore() {
   const rawUrl = `${GITLAB_URL}/dev-team/ci-templates/-/raw/main/review-core.js`;
   const res = await fetch(rawUrl);
@@ -27,6 +49,11 @@ async function fetchCore() {
   return await import(tmpFile);
 }
 
+/**
+ * Fetch and prepare the AI prompt from the CI templates project.
+ * Replaces the {{DATE}} placeholder with today's date.
+ * @returns {Promise<string>} The processed prompt text
+ */
 async function fetchPrompt() {
   const today = new Date().toISOString().slice(0, 10);
   const rawUrl = `${GITLAB_URL}/dev-team/ci-templates/-/raw/main/prompt.md`;
@@ -37,6 +64,12 @@ async function fetchPrompt() {
   return prompt;
 }
 
+/**
+ * Call the Google Gemini API with a given prompt.
+ * Parses the first JSON object from the response text.
+ * @param {string} prompt - The full prompt including diff context
+ * @returns {Promise<string>} Raw JSON string from Gemini
+ */
 async function callGemini(prompt) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -56,20 +89,18 @@ async function main() {
 
   const core = await fetchCore();
 
-  // 1. Fetch MR info
+  // ── 1. Fetch MR info and parse spec requirements ──────
   const mrRes = await fetch(`${API}/projects/${PROJECT_ID}/merge_requests/${MR_IID}`, { headers });
   const mr = await mrRes.json();
   const diffRefs = mr.diff_refs;
   const sourceBranch = mr.source_branch;
   console.log(`[CI Review] Diff refs: ${diffRefs.base_sha.slice(0, 8)}..${diffRefs.head_sha.slice(0, 8)}`);
 
-  // Parse spec requirements from MR description
   let specs = core.parseSpec(mr.description || '');
   if (specs.length > 0) {
     console.log(`[CI Review] Found ${specs.length} spec requirements (MR description)`);
   }
 
-  // Fetch project default rules from .review-rules.md
   const rulesPath = encodeURIComponent('.review-rules.md');
   const rulesRes = await fetch(
     `${API}/projects/${PROJECT_ID}/repository/files/${rulesPath}/raw?ref=${encodeURIComponent(sourceBranch)}`,
@@ -84,7 +115,7 @@ async function main() {
     }
   }
 
-  // 2. Fetch diff
+  // ── 2. Fetch diff ──────────────────────────────────────
   const diffRes = await fetch(`${API}/projects/${PROJECT_ID}/merge_requests/${MR_IID}/diffs`, { headers });
   const diffData = await diffRes.json();
   const files = diffData.map(d => ({
@@ -98,7 +129,7 @@ async function main() {
     process.exit(0);
   }
 
-  // 3. Fetch full file content from source branch for context
+  // ── 3. Fetch full file content for context ─────────────
   const fileContexts = [];
   for (const f of files) {
     if (f.status === 'removed') continue;
@@ -124,7 +155,7 @@ async function main() {
 
   console.log(`[CI Review] Sending ${fullContext.length} chars to Gemini`);
 
-  // 4. Fetch prompt and call Gemini
+  // ── 4. Call Gemini ─────────────────────────────────────
   const prompt = await fetchPrompt();
   const rawJson = await callGemini(prompt + '\n\n' + fullContext);
   const sanitized = core.fixJSONNewlines(rawJson);
@@ -146,14 +177,14 @@ async function main() {
     console.log(`[CI Review] Spec results: ${passed} passed, ${failed} failed`);
   }
 
-  // 5. Post summary note with spec compliance
+  // ── 5. Post summary note ───────────────────────────────
   const header = result.approved ? '### AI Review: Looks good' : '### AI Review: Issues found';
   const extra = core.buildSpecExtra(result.specResults);
   await fetch(`${API}/projects/${PROJECT_ID}/merge_requests/${MR_IID}/notes`, {
     method: 'POST', headers, body: JSON.stringify({ body: `${header}\n\n${result.summary}${extra}` }),
   });
 
-  // 6. Build valid line ranges from current diff
+  // ── 6. Build valid line positions from current diff ────
   const validPositions = new Set();
   for (const f of files) {
     for (const ln of core.getDiffLineNumbers(f.patch)) {
@@ -162,7 +193,7 @@ async function main() {
   }
   console.log(`[CI Review] Valid positions in diff: ${validPositions.size}`);
 
-  // 7. Fetch existing discussions, filter to only those still in current diff
+  // ── 7. Fetch existing discussions to avoid duplicates ──
   const existingDiscs = await fetch(
     `${API}/projects/${PROJECT_ID}/merge_requests/${MR_IID}/discussions`, { headers }
   );
@@ -182,7 +213,7 @@ async function main() {
   }
   console.log(`[CI Review] Existing positions (still in diff): ${existingPositions.size}`);
 
-  // 8. Post inline comments (skip if already present)
+  // ── 8. Post inline comments ────────────────────────────
   const seen = new Set();
   for (const comment of result.comments) {
     const key = `${comment.path}:${comment.line}`;
@@ -216,7 +247,7 @@ async function main() {
     }
   }
 
-  // 9. Save review artifact
+  // ── 9. Save review artifact ────────────────────────────
   const artifactPath = 'review-result.json';
   const artifact = {
     approved: result.approved,
@@ -230,7 +261,7 @@ async function main() {
   fs.writeFileSync(artifactPath, JSON.stringify(artifact, null, 2));
   console.log(`[CI Review] Artifact saved to ${artifactPath}`);
 
-  // 10. Quality gate
+  // ── 10. Quality gate ───────────────────────────────────
   if (!result.approved) {
     console.log('[CI Review] Quality gate FAILED — issues found');
     process.exit(1);

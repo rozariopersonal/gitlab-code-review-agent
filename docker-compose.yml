@@ -28,30 +28,6 @@ services:
       retries: 5
       start_period: 120s
 
-  reviewer:
-    build:
-      context: ./agent
-      dockerfile: Dockerfile
-      target: development
-    container_name: gitlab-reviewer
-    restart: unless-stopped
-    environment:
-      NODE_ENV: development
-      PORT: 3005
-      GITLAB_URL: http://gitlab:8929
-      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-    ports:
-      - "3005:3005"
-    volumes:
-      - ./agent:/app
-      - /app/node_modules
-    depends_on:
-      gitlab:
-        condition: service_healthy
-    networks:
-      - gitlab-review-net
-
   runner:
     image: gitlab/gitlab-runner:alpine
     container_name: gitlab-runner

@@ -1,6 +1,6 @@
 # GitLab AI Code Review Agent
 
-Automated code review for GitLab merge requests powered by Google Gemini AI. Posts inline comments, enforces spec requirements, and blocks merges on critical issues — no webhooks required.
+Automated code review for GitLab merge requests powered by Google Gemini AI. Posts inline comments, enforces spec requirements, and blocks merges on critical issues — no webhooks, no servers to maintain.
 
 ## How It Works
 
@@ -51,51 +51,40 @@ docker compose up -d
 # (setup runs automatically and clones sindresorhus/conf)
 cd repos/conf
 git checkout -b feat/add-save-method
-# make some changes (e.g. add a new feature)
 git add -A && git commit -m "feat: add save method"
 git remote add gitlab http://root:SecureRoot789!@localhost:8929/dev-team/conf.git
 git push -u gitlab feat/add-save-method
 # Open MR at http://localhost:8929/dev-team/conf
-# Wait for the AI review pipeline to finish
+# Watch the AI review pipeline run
 ```
 
 ## Architecture
 
 ```
 gitlab-ai-reviewer/
-├── agent/                        # 🧠 Review engine
+├── agent/                        # Review engine
 │   ├── ci-review.mjs             # CI pipeline script (entry point)
-│   ├── review-core.js            # Shared utilities (parsing, formatting, line mapping)
-│   ├── prompt.md                 # AI prompt template with {{DATE}} placeholder
-│   ├── src/
-│   │   ├── index.ts              # Express webhook server
-│   │   ├── reviewer.ts           # Review orchestration
-│   │   ├── gitlab.ts             # GitLab API client
-│   │   ├── types.ts              # TypeScript types
-│   │   └── ai/
-│   │       ├── provider.ts       # AI provider interface
-│   │       └── gemini.ts         # Gemini integration
-│   ├── Dockerfile                # Container image for webhook server
-│   └── package.json
-├── repos/                        # 📦 Cloned test repos (gitignored)
+│   ├── review-core.js            # Shared utilities (pure functions, no deps)
+│   └── prompt.md                 # AI prompt template with {{DATE}}
+├── repos/                        # Cloned GitHub repos (gitignored)
 │   └── .gitkeep
 ├── scripts/
-│   ├── setup.sh                  # 🚀 Auto-runs via docker-compose setup service
+│   ├── setup.sh                  # Auto-runs via docker-compose setup service
 │   └── seed-test-repo.sh         # Fallback: generates a test repo if clone fails
 ├── setup/
-│   └── Dockerfile                # Lightweight container for setup service
-├── test/
-│   ├── send-webhook.sh           # Test script for webhook mode
-│   └── webhook-payload.json      # Sample webhook payload
+│   └── Dockerfile                # Container for the auto-setup service
 ├── docker-compose.yml            # GitLab CE + Runner + Auto-setup
 └── .env.example                  # Environment variables template
 ```
 
-## How the CI Pipeline Runs
+## How the AI Review Runs
 
-The review runs as a CI job inside the target project's pipeline — no external servers. The pipeline script (`ci-review.mjs`) and shared utilities (`review-core.js`) are stored in a central `dev-team/ci-templates` project and fetched at runtime via raw URL.
+The review runs as a CI job inside the target project's pipeline — no external servers needed.
 
-Target projects include the template:
+### CI Templates Project
+
+The pipeline script (`ci-review.mjs`) and utilities (`review-core.js`, `prompt.md`) live in a central `dev-team/ci-templates` project. Target projects include them:
+
 ```yaml
 include:
   - project: dev-team/ci-templates
@@ -103,45 +92,43 @@ include:
     ref: main
 ```
 
-The CI job:
-1. Fetches `review-core.js` and `prompt.md` from the templates project
-2. Retrieves the MR diff and full file contents from the GitLab API
-3. Parses spec requirements from the MR description and `.review-rules.md`
-4. Sends everything to Google Gemini with a structured prompt
-5. Posts a summary note and inline comments on the MR
-6. Saves `review-result.json` as a CI artifact
-7. Exits with code 1 if issues found — blocking the merge
+At pipeline runtime, `ci-review.mjs` fetches `review-core.js` and `prompt.md` from the templates project via raw URL, then:
 
-## What Gets Created
+1. Retrieves the MR diff and full file contents from the GitLab API
+2. Parses spec requirements from the MR description and `.review-rules.md`
+3. Sends everything to Google Gemini with a structured prompt
+4. Posts a summary note and inline comments on the MR
+5. Saves `review-result.json` as a CI artifact
+6. Exits with code 1 if issues found — blocking the merge
 
-When `docker compose up` runs, the `setup` service automatically:
+## What Gets Created on `docker compose up`
 
 | Resource | Description |
 |---|---|
 | `dev-team` group | GitLab group for all projects |
-| `dev-team/ci-templates` | CI template project with `ci-review.mjs`, `review-core.js`, `prompt.md`, `ci-template.yml` |
-| `dev-team/conf` | Mirror of `sindresorhus/conf` — a real open-source TypeScript config library |
-| `repos/conf/` | Local clone — edit code here and push to GitLab to test the review |
+| `dev-team/ci-templates` | CI template project with review files |
+| `dev-team/conf` | Mirror of `sindresorhus/conf` (real open-source TypeScript project) |
+| `repos/conf/` | Local clone — edit here and push to GitLab to test the review |
 | `project-runner` | GitLab Runner registered with Docker executor |
-| CI labels | `review/pass` and `review/fail` labels on the test project |
+| CI labels | `review/pass` and `review/fail` on the test project |
 
 ## Customization
 
-### Use Your Own Test Repo
+### Use Your Own Repo
 
 ```bash
 export SOURCE_REPO="https://github.com/your-org/your-repo.git"
 docker compose up -d
 ```
 
-Or run setup manually with any repo:
+Or run setup manually:
 ```bash
 ./scripts/setup.sh https://github.com/your-org/your-repo.git
 ```
 
 ### Prompt
 
-Edit `agent/prompt.md` to change review criteria. The `{{DATE}}` placeholder is replaced at runtime. The AI always returns structured JSON:
+Edit `agent/prompt.md` to change how the AI evaluates code. The `{{DATE}}` placeholder is replaced at runtime. The AI must return structured JSON:
 
 ```json
 {
@@ -200,12 +187,9 @@ The AI checks each rule against the diff.
 | File | Purpose |
 |---|---|
 | `agent/ci-review.mjs` | CI pipeline script |
-| `agent/review-core.js` | Shared utilities |
+| `agent/review-core.js` | Shared utilities (pure functions, zero dependencies) |
 | `agent/prompt.md` | AI prompt template |
-| `agent/src/index.ts` | Webhook server |
-| `agent/src/reviewer.ts` | Review orchestration |
-| `agent/src/gitlab.ts` | GitLab API client |
 | `scripts/setup.sh` | Auto-runs on docker compose up via setup service |
-| `scripts/seed-test-repo.sh` | Fallback: generates a test repo if clone fails |
+| `scripts/seed-test-repo.sh` | Fallback: generates test repo if clone fails |
 | `setup/Dockerfile` | Container for the auto-setup service |
-| `docker-compose.yml` | GitLab CE + Runner + Reviewer + Auto-setup |
+| `docker-compose.yml` | GitLab CE + Runner + Auto-setup |
