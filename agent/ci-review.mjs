@@ -230,26 +230,7 @@ async function main() {
   fs.writeFileSync(artifactPath, JSON.stringify(artifact, null, 2));
   console.log(`[CI Review] Artifact saved to ${artifactPath}`);
 
-  // 10. Apply CI labels (GitLab CE bug: remove_labels + add_labels in one request
-  //     causes add_labels to be ignored, so make two separate calls)
-  const labelAdd = result.approved ? 'review/pass' : 'review/fail';
-  const labelRemove = result.approved ? 'review/fail' : 'review/pass';
-  const lr1 = await fetch(
-    `${API}/projects/${PROJECT_ID}/merge_requests/${MR_IID}`,
-    { method: 'PUT', headers, body: JSON.stringify({ remove_labels: `review/pass,review/fail` }) }
-  );
-  const lr2 = await fetch(
-    `${API}/projects/${PROJECT_ID}/merge_requests/${MR_IID}`,
-    { method: 'PUT', headers, body: JSON.stringify({ add_labels: labelAdd }) }
-  );
-  if (lr2.ok) {
-    console.log(`[CI Review] Label set: ${labelAdd}`);
-  } else {
-    const errText = (await lr2.text()).slice(0, 100);
-    console.error(`[CI Review] Failed to set label: ${errText}`);
-  }
-
-  // 11. Quality gate
+  // 10. Quality gate
   if (!result.approved) {
     console.log('[CI Review] Quality gate FAILED — issues found');
     process.exit(1);
