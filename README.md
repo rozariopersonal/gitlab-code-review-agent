@@ -38,87 +38,62 @@ Developer pushes MR ──► GitLab CI triggers review job
                     if issues found → blocks merge
 ```
 
+## Quick Start
+
+```bash
+# 1. Start GitLab + Runner
+docker compose up -d
+
+# 2. Set your Gemini API key
+export GEMINI_API_KEY="your-key-here"
+
+# 3. Run setup — creates templates + test repo on local GitLab
+./scripts/setup.sh
+
+# 4. Test the review
+cd repos/order-service
+git checkout -b feat/test-review
+# make some changes...
+git add -A && git commit -m "Test review"
+git remote add gitlab http://root:SecureRoot789!@localhost:8929/dev-team/order-service.git
+git push -u gitlab feat/test-review
+# Open MR at http://localhost:8929/dev-team/order-service
+```
+
 ## Architecture
 
 ```
 gitlab-ai-reviewer/
-├── agent/
-│   ├── ci-review.mjs          # CI pipeline script (entry point)
-│   ├── review-core.js          # Shared utilities (parsing, formatting, line mapping)
-│   ├── prompt.md               # AI prompt template with {{DATE}} placeholder
+├── agent/                        # 🧠 Review engine
+│   ├── ci-review.mjs             # CI pipeline script (entry point)
+│   ├── review-core.js            # Shared utilities (parsing, formatting, line mapping)
+│   ├── prompt.md                 # AI prompt template with {{DATE}} placeholder
 │   ├── src/
-│   │   ├── index.ts            # Express webhook server
-│   │   ├── reviewer.ts         # Review orchestration
-│   │   ├── gitlab.ts           # GitLab API client
-│   │   ├── types.ts            # TypeScript types
+│   │   ├── index.ts              # Express webhook server
+│   │   ├── reviewer.ts           # Review orchestration
+│   │   ├── gitlab.ts             # GitLab API client
+│   │   ├── types.ts              # TypeScript types
 │   │   └── ai/
-│   │       ├── provider.ts     # AI provider interface
-│   │       └── gemini.ts       # Gemini integration
-│   ├── Dockerfile              # Container image for webhook server
-│   ├── package.json
-│   └── tsconfig.json
-├── mock/
-│   └── src/index.ts            # Mock GitLab API for local development
+│   │       ├── provider.ts       # AI provider interface
+│   │       └── gemini.ts         # Gemini integration
+│   ├── Dockerfile                # Container image for webhook server
+│   └── package.json
+├── repos/                        # 📦 Cloned test repos (gitignored)
+│   └── .gitkeep
+├── scripts/
+│   └── setup.sh                  # 🚀 One-command environment setup
 ├── test/
-│   ├── send-webhook.sh         # Test script for webhook mode
-│   └── webhook-payload.json    # Sample webhook payload
-├── docker-compose.yml          # Full dev environment (GitLab + Runner + Agent)
-└── .env.example                # Environment variables template
+│   ├── send-webhook.sh           # Test script for webhook mode
+│   └── webhook-payload.json      # Sample webhook payload
+├── docker-compose.yml            # GitLab CE + Runner + Reviewer
+└── .env.example                  # Environment variables template
 ```
 
-## Two Deployment Modes
+## How the CI Pipeline Runs
 
-### 1. CI Pipeline Mode (Primary)
+The review runs as a CI job inside the target project's pipeline — no external servers. The pipeline script (`ci-review.mjs`) and shared utilities (`review-core.js`) are stored in a central `dev-team/ci-templates` project and fetched at runtime via raw URL.
 
-The review runs as a job inside your GitLab CI pipeline — no webhooks, no servers to maintain.
-
-**Setup:**
-
-#### A. Create a CI Templates project
-
-Create a project (e.g., `dev-team/ci-templates`) and add these files:
-
-**ci-template.yml** — The reusable CI template:
-
-```yaml
-stages:
-  - review
-
-ai-review:
-  stage: review
-  image: node:22-alpine
-  before_script:
-    - apk add --no-cache curl
-    - curl -sO http://gitlab:8929/dev-team/ci-templates/-/raw/main/ci-review.mjs
-  script:
-    - node ci-review.mjs
-  artifacts:
-    when: always
-    paths:
-      - review-result.json
-    expire_in: 30 days
-  variables:
-    NODE_ENV: production
-    GITLAB_URL: http://gitlab:8929
-  rules:
-    - if: $CI_MERGE_REQUEST_IID
-```
-
-Add `ci-review.mjs` and `review-core.js` to the same project. These are fetched at pipeline runtime by the CI job.
-
-#### B. Configure CI variables
-
-| Variable | Description |
-|---|---|
-| `GITLAB_TOKEN` | GitLab PAT with Reporter scope (for posting comments) |
-| `GEMINI_API_KEY` | Your Google Gemini API key |
-
-Set these in **Settings → CI/CD → Variables** on the target project.
-
-#### C. Enable the review in your project
-
-Add one file — `.gitlab-ci.yml`:
-
+Target projects include the template:
 ```yaml
 include:
   - project: dev-team/ci-templates
@@ -126,31 +101,90 @@ include:
     ref: main
 ```
 
-That's it. Every MR will automatically trigger an AI review.
+The CI job:
+1. Fetches `review-core.js` and `prompt.md` from the templates project
+2. Retrieves the MR diff and full file contents from the GitLab API
+3. Parses spec requirements from the MR description and `.review-rules.md`
+4. Sends everything to Google Gemini with a structured prompt
+5. Posts a summary note and inline comments on the MR
+6. Saves `review-result.json` as a CI artifact
+7. Exits with code 1 if issues found — blocking the merge
 
-#### D. (Optional) Add project rules
+## Setup
 
-Create `.review-rules.md` in your project's default branch with a `## Spec` section:
+### Prerequisites
+
+- Docker & Docker Compose
+- A Google Gemini API key ([get one free](https://aistudio.google.com/apikey))
+
+### One-Command Setup
+
+```bash
+# Start GitLab and the Runner
+docker compose up -d
+
+# Run setup (creates templates project + test repo)
+GEMINI_API_KEY="your-key-here" ./scripts/setup.sh
+```
+
+The setup script:
+1. Waits for GitLab to be healthy
+2. Creates the `dev-team/ci-templates` project with `ci-review.mjs`, `review-core.js`, `prompt.md`, and `ci-template.yml`
+3. Clones a GitHub repo into `repos/<name>` (default: `order-service-test`)
+4. Creates the `dev-team/<repo>` project on GitLab
+5. Pushes the repo and adds `.gitlab-ci.yml` with the template include
+6. Creates CI labels and sets the `GITLAB_TOKEN` variable
+
+### Custom Test Repo
+
+Use any GitHub repo as the test project:
+
+```bash
+./scripts/setup.sh https://github.com/your-org/your-repo.git
+```
+
+Once cloned to `repos/<name>`, you can edit code locally and push to the local GitLab to test the review.
+
+### CI Variables
+
+Set these in your target project's **Settings → CI/CD → Variables**:
+
+| Variable | Description |
+|---|---|
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `GITLAB_TOKEN` | GitLab PAT (Reporter scope) for posting comments |
+
+## Customization
+
+### Prompt
+
+Edit `agent/prompt.md` to change review criteria. The `{{DATE}}` placeholder is replaced at runtime. The AI always returns structured JSON:
+
+```json
+{
+  "summary": "1-line summary",
+  "approved": true,
+  "comments": [
+    { "note": "Issue description", "path": "file.ts", "line": 42 }
+  ],
+  "specResults": [
+    { "text": "requirement", "satisfied": true },
+    { "text": "another", "satisfied": false, "reason": "explanation" }
+  ]
+}
+```
+
+### Project Rules
+
+Create `.review-rules.md` in your project's default branch:
 
 ```markdown
 ## Spec
 - [ ] Hardcoded API secrets must be removed before merge
 - [ ] All eval() calls must be removed
-- [ ] Payment failures must be propagated, not silently logged
 ```
 
-The AI will check each rule against the diff.
-
-### 2. Webhook Server Mode
-
-For non-CI environments or offline review:
-
-```bash
-# Start the server
-docker compose up reviewer
-```
-
-Configure GitLab to send MR webhooks to `http://reviewer:3005/webhook/gitlab`.
+The AI checks each rule against the diff.
 
 ## What the AI Checks
 
@@ -169,49 +203,11 @@ Configure GitLab to send MR webhooks to `http://reviewer:3005/webhook/gitlab`.
 - Spec requirement compliance
 - Project rule enforcement
 
-## Customizing the Prompt
-
-Edit `prompt.md` to change how the AI evaluates code. The `{{DATE}}` placeholder is replaced with today's date at runtime. The AI always returns structured JSON matching the expected schema:
-
-```json
-{
-  "summary": "1-line summary",
-  "approved": true,
-  "comments": [
-    { "note": "Issue description", "path": "file.ts", "line": 42 }
-  ],
-  "specResults": [
-    { "text": "requirement", "satisfied": true },
-    { "text": "another", "satisfied": false, "reason": "explanation" }
-  ]
-}
-```
-
-## Local Development
-
-```bash
-# Copy environment config
-cp .env.example .env
-# Edit .env with your tokens
-
-# Start full environment
-docker compose up -d
-
-# GitLab is available at http://localhost:8929
-# Reviewer server at http://localhost:3005
-```
-
-The mock server provides a fake GitLab API for testing review logic without a real instance:
-
-```bash
-docker compose up mock
-```
-
 ## Pipeline Behavior
 
 | Condition | Result |
 |---|---|
-| No issues found | Pipeline passes, `review-result.json` saved with `approved: true` |
+| No issues found | Pipeline passes, `review-result.json` with `approved: true` |
 | Issues found | Pipeline fails (exit 1), artifact saved with issues listed |
 | No diff changes | Pipeline exits 0 (skip) |
 | Spec requirement not met | `approved: false` regardless of other comments |
@@ -220,10 +216,11 @@ docker compose up mock
 
 | File | Purpose |
 |---|---|
-| `agent/ci-review.mjs` | Main CI pipeline script |
-| `agent/review-core.js` | Shared utilities shared by CI and webhook modes |
+| `agent/ci-review.mjs` | CI pipeline script |
+| `agent/review-core.js` | Shared utilities |
 | `agent/prompt.md` | AI prompt template |
 | `agent/src/index.ts` | Webhook server |
-| `agent/src/reviewer.ts` | Review orchestration logic |
-| `agent/src/gitlab.ts` | GitLab REST API client |
-| `mock/src/index.ts` | Mock GitLab API for testing |
+| `agent/src/reviewer.ts` | Review orchestration |
+| `agent/src/gitlab.ts` | GitLab API client |
+| `scripts/setup.sh` | One-command environment setup |
+| `docker-compose.yml` | GitLab CE + Runner + Reviewer |
