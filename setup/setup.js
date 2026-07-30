@@ -89,7 +89,8 @@ async function registerRunner(api) {
     --url "http://gitlab:8929" \
     --registration-token "${regToken}" \
     --executor "docker" \
-    --docker-image "node:22-alpine" \
+    --docker-image "ai-review-agent:latest" \
+    --docker-pull-policy "if-not-present" \
     --docker-network-mode "gitlab-ai-reviewer_gitlab-review-net" \
     --docker-volumes "/var/run/docker.sock:/var/run/docker.sock" \
     --tag-list "project-runner" \
