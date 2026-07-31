@@ -1,18 +1,25 @@
 /**
- * @file Shared utilities for the GitLab AI code review agent.
- * Used by both the CI pipeline script (ci-review.mjs) and webhook server (deprecated).
- * All functions are pure — no side effects, no I/O, no dependencies.
+ * @file Pure utility functions for the GitLab AI code review agent.
+ * No side effects, no I/O, no dependencies.
  */
+
+export interface SpecResult {
+  text: string;
+  satisfied: boolean;
+  reason?: string;
+}
 
 /**
  * Replace literal newlines inside JSON strings with escaped newlines (\n).
  * Gemini sometimes returns real newlines within string values, which breaks JSON.parse.
  * Walks the raw character stream tracking string boundaries.
- * @param {string} raw - Raw JSON text from Gemini
- * @returns {string} Sanitized JSON text with escaped newlines in strings
+ * @param raw - Raw JSON text from Gemini
+ * @returns Sanitized JSON text with escaped newlines in strings
  */
-function fixJSONNewlines(raw) {
-  let out = '', inStr = false, esc = false;
+export function fixJSONNewlines(raw: string): string {
+  let out = '';
+  let inStr = false;
+  let esc = false;
   for (const ch of raw) {
     if (esc) { esc = false; out += ch; continue; }
     if (ch === '\\') { esc = true; out += ch; continue; }
@@ -30,17 +37,18 @@ function fixJSONNewlines(raw) {
  *
  * Walks the hunk headers (@@ -old +new @@) and counts lines to determine
  * the old-line mapping. Returns {} for added lines (no old_line needed).
- * @param {string|undefined} patch - Unified diff patch text
- * @param {number} targetNewLine - Line number in the new file
- * @returns {{old_line?: number}} Object with old_line if the line exists in the old file
+ * @param patch - Unified diff patch text
+ * @param targetNewLine - Line number in the new file
+ * @returns Object with old_line if the line exists in the old file
  */
-function getLinePosition(patch, targetNewLine) {
+export function getLinePosition(patch: string | undefined, targetNewLine: number): { old_line?: number } {
   if (!patch) return {};
   const lines = patch.split('\n');
-  let oldLine = 0, newLine = 0;
+  let oldLine = 0;
+  let newLine = 0;
   for (const line of lines) {
     const m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (m) { oldLine = parseInt(m[1]) - 1; newLine = parseInt(m[2]) - 1; continue; }
+    if (m) { oldLine = parseInt(m[1]!, 10) - 1; newLine = parseInt(m[2]!, 10) - 1; continue; }
     if (line.startsWith('---') || line.startsWith('+++')) continue;
     if (line.startsWith('+')) { newLine++; if (newLine === targetNewLine) return {}; }
     else if (line.startsWith('-')) { oldLine++; }
@@ -53,16 +61,16 @@ function getLinePosition(patch, targetNewLine) {
 /**
  * Extract all line numbers in the new file that appear in a unified diff patch.
  * Used to determine which positions are valid targets for inline comments.
- * @param {string} patch - Unified diff patch text
- * @returns {Set<number>} Set of new-file line numbers present in the diff
+ * @param patch - Unified diff patch text
+ * @returns Set of new-file line numbers present in the diff
  */
-function getDiffLineNumbers(patch) {
+export function getDiffLineNumbers(patch: string): Set<number> {
   const lines = patch.split('\n');
-  const nums = new Set();
+  const nums = new Set<number>();
   let newLine = 0;
   for (const line of lines) {
     const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (m) { newLine = parseInt(m[1]); continue; }
+    if (m) { newLine = parseInt(m[1]!, 10); continue; }
     if (line.startsWith('--- ') || line.startsWith('+++ ')) continue;
     if (line.startsWith('+') || line.startsWith(' ')) { nums.add(newLine); newLine++; }
   }
@@ -73,16 +81,16 @@ function getDiffLineNumbers(patch) {
  * Format a unified diff patch with line number prefixes for the AI prompt.
  * Each line in the new file gets a "NNN>" prefix (e.g., " 42>+console.log()").
  * Removed lines show "    " (no prefix). Helps Gemini reference exact line numbers.
- * @param {string} patch - Unified diff patch text
- * @returns {string} Formatted diff with line number prefixes
+ * @param patch - Unified diff patch text
+ * @returns Formatted diff with line number prefixes
  */
-function formatDiffWithLineNumbers(patch) {
+export function formatDiffWithLineNumbers(patch: string): string {
   const lines = patch.split('\n');
-  const out = [];
+  const out: string[] = [];
   let newLine = 0;
   for (const line of lines) {
     const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (m) { newLine = parseInt(m[1]); out.push(line); continue; }
+    if (m) { newLine = parseInt(m[1]!, 10); out.push(line); continue; }
     if (line.startsWith('--- ') || line.startsWith('+++ ')) { out.push(line); continue; }
     if (line.startsWith('+')) { out.push(`${String(newLine).padStart(3)}>${line}`); newLine++; }
     else if (line.startsWith(' ')) { out.push(`${String(newLine).padStart(3)}>${line}`); newLine++; }
@@ -97,14 +105,14 @@ function formatDiffWithLineNumbers(patch) {
  * Looks for a "## Spec" section and extracts checkbox items:
  *   - [ ] Requirement text
  *   - [x] Completed requirement text
- * @param {string} description - Markdown text (MR description or file content)
- * @returns {string[]} Array of requirement descriptions
+ * @param description - Markdown text (MR description or file content)
+ * @returns Array of requirement descriptions
  */
-function parseSpec(description) {
+export function parseSpec(description: string | undefined): string[] {
   if (!description) return [];
   const m = description.match(/## Spec\s*\n([\s\S]*?)(?:\n## |$)/);
   if (!m) return [];
-  const items = m[1].match(/-\s*\[.?\]\s*(.+)/g);
+  const items = m[1]!.match(/-\s*\[.?\]\s*(.+)/g);
   if (!items) return [];
   return items.map(item => item.replace(/-\s*\[.?\]\s*/, '').trim());
 }
@@ -112,10 +120,10 @@ function parseSpec(description) {
 /**
  * Build a markdown "Spec Requirements" section for the AI prompt.
  * Wraps spec items in a checklist format with [ ] markers.
- * @param {string[]} specs - Array of requirement descriptions
- * @returns {string} Formatted markdown section (empty string if no specs)
+ * @param specs - Array of requirement descriptions
+ * @returns Formatted markdown section (empty string if no specs)
  */
-function buildSpecContext(specs) {
+export function buildSpecContext(specs: string[]): string {
   if (!specs || specs.length === 0) return '';
   const items = specs.map((s, i) => `${i + 1}. [ ] ${s}`).join('\n');
   return `## Spec Requirements\n\n${items}\n\n`;
@@ -124,10 +132,10 @@ function buildSpecContext(specs) {
 /**
  * Build a markdown spec-compliance summary for the MR summary note.
  * Shows passed / failed checkboxes with reasons for failures.
- * @param {{text: string, satisfied: boolean, reason?: string}[]} specResults
- * @returns {string} Formatted markdown section (empty string if no results)
+ * @param specResults - AI-generated spec compliance results
+ * @returns Formatted markdown section (empty string if no results)
  */
-function buildSpecExtra(specResults) {
+export function buildSpecExtra(specResults: SpecResult[] | undefined): string {
   if (!specResults || specResults.length === 0) return '';
   const passed = specResults.filter(s => s.satisfied);
   const failed = specResults.filter(s => !s.satisfied);
@@ -135,13 +143,3 @@ function buildSpecExtra(specResults) {
   const flines = failed.map(s => `- [ ] ${s.text}${s.reason ? ` — ${s.reason}` : ''}`);
   return `\n\n#### Spec Compliance\n${lines.join('\n')}\n${flines.join('\n')}`;
 }
-
-module.exports = {
-  fixJSONNewlines,
-  getLinePosition,
-  getDiffLineNumbers,
-  formatDiffWithLineNumbers,
-  parseSpec,
-  buildSpecContext,
-  buildSpecExtra,
-};

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+setup/node_modules
 .env
 *.log
 .gitlab/

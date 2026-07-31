@@ -1,6 +1,6 @@
 import { GitLabClient } from './gitlab.js';
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, cpSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -11,7 +11,7 @@ const PROJECT_DIR = join(__dirname, '..');
 
 const {
   GITLAB_URL = 'http://localhost:8929',
-  ROOT_PASSWORD = 'SecureRoot789!',
+  ROOT_PASSWORD = 'Xk9mP4vN!2zQ',
   SOURCE_REPO: SOURCE_REPO_ENV = '',
   GROUP_NAME = 'dev-team',
   TEMPLATE_PROJECT = 'ci-templates',
@@ -31,11 +31,11 @@ function sh(cmd, opts = {}) {
   return execSync(cmd, { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024, ...opts }).trim();
 }
 
-async function waitForGitLab(api) {
+async function waitForGitLab(baseUrl) {
   process.stdout.write('Waiting for GitLab to be healthy...');
   for (let i = 0; i < 30; i++) {
     try {
-      const res = await fetch(`${api.baseUrl}/-/health`);
+      const res = await fetch(`${baseUrl}/users/sign_in`);
       if (res.ok) { console.log(' ready.'); return; }
     } catch {}
     process.stdout.write('.');
@@ -68,11 +68,20 @@ async function ensureProject(api, name, namespaceId) {
   return project;
 }
 
+function gitConfig() {
+  try {
+    sh(`git config --global user.email "setup@gitlab.local"`);
+    sh(`git config --global user.name "Setup"`);
+  } catch {}
+}
+
 function gitPushFromDir(sourceDir, targetUrl) {
-  sh(`git -C "${sourceDir}" init`);
+  gitConfig();
+  sh(`git -C "${sourceDir}" init -b main`);
+  sh(`git -C "${sourceDir}" remote remove gl || true`);
+  sh(`git -C "${sourceDir}" remote add gl "${targetUrl}"`);
   sh(`git -C "${sourceDir}" add -A`);
   sh(`git -C "${sourceDir}" commit -m "Initial commit" --no-verify --allow-empty`);
-  sh(`git -C "${sourceDir}" remote add gl "${targetUrl}"`, { stdio: 'pipe' });
   sh(`git -C "${sourceDir}" push -f gl HEAD:main`);
 }
 
@@ -81,8 +90,21 @@ async function registerRunner(api) {
   if (runners && runners.length > 0) { log('Runner already registered.'); return; }
 
   log('Registering runner (project-runner, docker executor)...');
-  const regToken = await api.getRunnerRegistrationToken();
-  if (!regToken) { log('WARNING: Could not get runner registration token.'); return; }
+  let regToken;
+  try {
+    regToken = sh(`docker exec gitlab-local gitlab-rails runner "
+      puts Gitlab::CurrentSettings.current_application_settings.runners_registration_token
+    "`);
+  } catch {}
+  if (!regToken) {
+    log('WARNING: Could not get runner registration token via Rails, trying ApplicationSettings API...');
+    regToken = await api.getRunnerRegistrationToken();
+  }
+  if (!regToken) {
+    log('WARNING: Could not get runner registration token. Runner registration skipped.');
+    log('You can register manually: docker exec -it gitlab-runner gitlab-runner register');
+    return;
+  }
 
   sh(`docker exec gitlab-runner gitlab-runner register \
     --non-interactive \
@@ -103,12 +125,26 @@ async function registerRunner(api) {
 async function main() {
   console.log('=== GitLab AI Reviewer — Full Setup ===\n');
 
-  const api = new GitLabClient(GITLAB_URL);
-
-  await waitForGitLab(api);
+  await waitForGitLab(GITLAB_URL);
   console.log('\n--- Step 0: Authenticate ---');
-  await api.login(ROOT_PASSWORD);
-  log('Root session token obtained.');
+  const ROOT_TOKEN = process.env.ROOT_TOKEN || 'glpat-root-token-12345';
+  log('Creating root PAT via Rails runner...');
+  try {
+    sh(`docker exec gitlab-local gitlab-rails runner "
+      u = User.find_by_username('root')
+      existing = PersonalAccessToken.where(user_id: u.id, name: 'setup-token').first
+      existing&.destroy!
+      t = PersonalAccessToken.create!(user: u, name: 'setup-token', scopes: ['api','read_api','write_repository','read_repository'], expires_at: 365.days.from_now)
+      t.set_token('${ROOT_TOKEN}')
+      t.save!
+      puts 'PAT created: ' + t.token
+    "`);
+    log('Root PAT created.');
+  } catch (e) {
+    log('Root PAT may already exist: ' + e.message.split('\n')[0].slice(0, 120));
+  }
+  const api = new GitLabClient(GITLAB_URL, ROOT_TOKEN);
+  log('Connected as root.');
 
   console.log('\n--- Step 1: Create Users ---');
   const bot = await ensureUser(api, BOT_USER, 'Review Bot', 'bot@example.com', USER_PASSWORD);
@@ -132,11 +168,16 @@ async function main() {
 
   console.log('\n--- Step 5: CI Templates ---');
   const tp = await ensureProject(api, TEMPLATE_PROJECT, group.id);
+  await api.unprotectBranch(tp.id);
+  log('Unprotected default branch for template project.');
 
   const tmp = join(tmpdir(), 'ci-templates-setup');
+  rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
-  cpSync(join(PROJECT_DIR, 'agent', 'ci-review.mjs'), join(tmp, 'ci-review.mjs'));
-  cpSync(join(PROJECT_DIR, 'agent', 'review-core.js'), join(tmp, 'review-core.js'));
+  cpSync(join(PROJECT_DIR, 'agent', 'ci-review.ts'), join(tmp, 'ci-review.ts'));
+  cpSync(join(PROJECT_DIR, 'agent', 'review-core.ts'), join(tmp, 'review-core.ts'));
+  cpSync(join(PROJECT_DIR, 'agent', 'gitlab.ts'), join(tmp, 'gitlab.ts'));
+  cpSync(join(PROJECT_DIR, 'agent', 'gemini.ts'), join(tmp, 'gemini.ts'));
   cpSync(join(PROJECT_DIR, 'agent', 'prompt.md'), join(tmp, 'prompt.md'));
   writeFileSync(join(tmp, 'ci-template.yml'), `
 stages:
@@ -145,6 +186,7 @@ stages:
 ai-review:
   stage: review
   image: ai-review-agent:latest
+  script: ["echo", "ENTRYPOINT handles the review"]
   artifacts:
     when: always
     paths:
@@ -178,6 +220,8 @@ ai-review:
   }
 
   const testProject = await ensureProject(api, REPO_NAME, group.id);
+  await api.unprotectBranch(testProject.id);
+  log('Unprotected default branch for test project.');
 
   const ciYmlPath = join(REPO_DIR, '.gitlab-ci.yml');
   if (!existsSync(ciYmlPath)) {

@@ -1,28 +1,19 @@
 import { Gitlab } from '@gitbeaker/rest';
-import { execSync } from 'child_process';
 
 export { Gitlab };
 
 export class GitLabClient {
-  constructor(baseUrl) {
+  constructor(baseUrl, token) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
-    this.api = null;
+    this.api = token ? new Gitlab({ host: this.baseUrl, token }) : null;
   }
 
   get connected() {
     return !!this.api;
   }
 
-  async login(password) {
-    const res = await fetch(`${this.baseUrl}/api/v4/session`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ login: 'root', password }),
-    });
-    if (!res.ok) throw new Error(`Login failed: ${res.status} ${await res.text()}`);
-    const data = await res.json();
-    this.api = new Gitlab({ host: this.baseUrl, token: data.private_token });
-    return data;
+  connect(token) {
+    this.api = new Gitlab({ host: this.baseUrl, token });
   }
 
   async findUser(username) {
@@ -62,7 +53,12 @@ export class GitLabClient {
   }
 
   async addMember(groupId, userId, accessLevel) {
-    return this.api.GroupMembers.add(groupId, accessLevel, { userId });
+    try {
+      return await this.api.GroupMembers.add(groupId, accessLevel, { userId });
+    } catch (e) {
+      if (e.message?.includes('already exists') || e.description?.includes('already exists')) return;
+      throw e;
+    }
   }
 
   async listRunners() {
@@ -83,6 +79,15 @@ export class GitLabClient {
       await this.api.ProjectVariables.edit(projectId, key, value, { masked });
     } catch {
       await this.api.ProjectVariables.create(projectId, key, value, { masked });
+    }
+  }
+
+  async unprotectBranch(projectId, branch = 'main') {
+    try {
+      await this.api.ProtectedBranches.remove(projectId, branch);
+      return true;
+    } catch {
+      return false;
     }
   }
 

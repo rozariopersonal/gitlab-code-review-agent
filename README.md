@@ -8,7 +8,7 @@ Automated code review for GitLab merge requests powered by Google Gemini AI. Pos
 Developer pushes MR ──► GitLab CI triggers review job
                               │
                               ▼
-                    ci-review.mjs runs in pipeline
+                    ci-review runs in pipeline
                               │
                     ┌─────────┴──────────┐
                     ▼                    ▼
@@ -52,7 +52,7 @@ docker compose up -d
 cd repos/conf
 git checkout -b feat/add-save-method
 git add -A && git commit -m "feat: add save method"
-git remote add gitlab http://root:SecureRoot789!@localhost:8929/dev-team/conf.git
+git remote add gitlab http://root:Xk9mP4vN!2zQ@localhost:8929/dev-team/conf.git
 git push -u gitlab feat/add-save-method
 # Open MR at http://localhost:8929/dev-team/conf
 # Watch the AI review pipeline run
@@ -63,10 +63,13 @@ git push -u gitlab feat/add-save-method
 ```
 gitlab-ai-reviewer/
 ├── agent/                        # Review engine (packaged as Docker image)
-│   ├── ci-review.mjs             # CI pipeline script (entry point)
-│   ├── review-core.js            # Shared utilities (pure functions, no deps)
+│   ├── ci-review.ts              # CI pipeline entry point (TypeScript)
+│   ├── review-core.ts            # Pure utility functions (no deps)
+│   ├── gitlab.ts                 # GitLab REST client module
+│   ├── gemini.ts                 # Gemini API client module
 │   ├── prompt.md                 # AI prompt template with {{DATE}}
-│   └── Dockerfile                # Builds ai-review-agent image
+│   ├── tsconfig.json             # tsc build config
+│   └── Dockerfile                # Multi-stage build → ai-review-agent image
 ├── repos/                        # Cloned GitHub repos (gitignored)
 │   └── .gitkeep
 ├── setup/
@@ -95,7 +98,7 @@ include:
     ref: main
 ```
 
-The template uses a pre-built Docker image (`ai-review-agent:latest`) that bundles `ci-review.mjs`, `review-core.js`, and `prompt.md`. The CI job simply runs the image — no downloading, no install step. The agent:
+The template uses a pre-built Docker image (`ai-review-agent:latest`) that bundles the compiled `ci-review`, `gemini`, `gitlab`, and `review-core` modules plus `prompt.md`. The CI job simply runs the image — no downloading, no install step. The agent:
 
 1. Retrieves the MR diff and full file contents from the GitLab API
 2. Parses spec requirements from the MR description and `.review-rules.md`
@@ -189,8 +192,10 @@ The AI checks each rule against the diff.
 
 | File | Purpose |
 |---|---|---|
-| `agent/ci-review.mjs` | CI pipeline script (entry point, packaged in Docker image) |
-| `agent/review-core.js` | Shared utilities (pure functions, zero dependencies) |
+| `agent/ci-review.ts` | CI pipeline entry point (compiled with `tsc`, packaged in Docker image) |
+| `agent/review-core.ts` | Pure utility functions (zero dependencies) |
+| `agent/gitlab.ts` | GitLab REST client module |
+| `agent/gemini.ts` | Gemini API client module |
 | `agent/prompt.md` | AI prompt template with `{{DATE}}` placeholder |
 | `agent/Dockerfile` | Builds the `ai-review-agent` image |
 | `setup/setup.js` | Auto-runs on docker compose up via setup service |

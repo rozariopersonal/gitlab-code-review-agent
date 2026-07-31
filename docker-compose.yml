@@ -8,7 +8,8 @@ services:
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'http://gitlab.local:8929'
         gitlab_rails['gitlab_shell_ssh_port'] = 2289
-        gitlab_rails['initial_root_password'] = 'SecureRoot789!'
+        gitlab_rails['initial_root_password'] = 'Xk9mP4vN!2zQ'
+        gitlab_rails['initial_root_token'] = 'glpat-root-token-12345'
         gitlab_rails['time_zone'] = 'UTC'
         gitlab_rails['gitlab_email_enabled'] = false
         prometheus_monitoring['enable'] = false
@@ -22,7 +23,7 @@ services:
     networks:
       - gitlab-review-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8929/-/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8929/users/sign_in || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -39,9 +40,7 @@ services:
       - gitlab-review-net
 
   setup:
-    build:
-      context: .
-      dockerfile: setup/Dockerfile
+    build: ./setup
     container_name: gitlab-setup
     restart: "no"
     environment:
