@@ -205,6 +205,14 @@ ai-review:
   log('CI templates pushed.');
   await api.setVariable(tp.id, 'GITLAB_TOKEN', botPat);
 
+  const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
+  if (GEMINI_KEY) {
+    await api.setVariable(tp.id, 'GEMINI_API_KEY', GEMINI_KEY);
+    log('GEMINI_API_KEY CI variable set.');
+  } else {
+    log('WARNING: GEMINI_API_KEY not set — set it in .env and re-run setup.');
+  }
+
   console.log('\n--- Step 6: Test Repo ---');
   if (existsSync(REPO_DIR)) {
     log(`Repo exists at ${REPO_DIR} — pulling latest...`);
@@ -240,6 +248,9 @@ ai-review:
   await api.createLabel(testProject.id, 'review/pass', '#108548');
   await api.createLabel(testProject.id, 'review/fail', '#6699cc');
   await api.setVariable(testProject.id, 'GITLAB_TOKEN', botPat);
+  if (GEMINI_KEY) {
+    await api.setVariable(testProject.id, 'GEMINI_API_KEY', GEMINI_KEY);
+  }
 
   console.log('\n=== Setup Complete ===\n');
   console.log(`  Users:        ${BOT_USER} (Reporter), ${DEV_USER} (Maintainer)`);

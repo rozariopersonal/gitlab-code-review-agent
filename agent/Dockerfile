@@ -9,4 +9,4 @@ FROM node:22-alpine
 RUN apk add --no-cache git
 WORKDIR /agent
 COPY --from=build /build/dist/ci-review.js /build/dist/gemini.js /build/dist/gitlab.js /build/dist/review-core.js /build/dist/prompt.md ./
-ENTRYPOINT ["node", "ci-review.js"]
+ENTRYPOINT ["node", "--no-network-family-autoselection", "ci-review.js"]
